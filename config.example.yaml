@@ -1,0 +1,85 @@
+# --- Personality / Opinion / Debate ---
+personality:
+	opinion:
+		enabled: false
+		alpha: 0.01
+	debate:
+		enabled: false
+		hesitation:
+			enabled: true
+			prob: 0.20
+# --- Emergency / Disaster Mode ---
+emergency:
+	enabled: false
+	cooldown_sec: 10.0
+	beep_wav_path: "assets/beep.wav"
+	force_language_ja: true
+	active_hold_sec: 10.0
+# --- STT Self-Address Detection ---
+stt:
+	self_address:
+		enabled: true
+		name_aliases:
+			- "美空"
+			- "みそら"
+			- "ミソラ"
+			- "misora"
+			- "sora"
+			- "miso"
+			- "mira"
+			- "miku"
+		debug: false
+# --- Learned Alias (Nickname) System ---
+		learned_alias:
+			enabled: false
+			min_len: 2
+			max_len: 8
+			init_weight: 0.10
+			inc_weight: 0.10
+			promote_threshold: 0.60
+			decay_tau_sec: 604800          # 7 days
+			max_entries: 64
+			ttl_context_sec: 300           # 5 min "addressed context" window
+			forbid_tokens: ["政治","選挙","宗教","差別","殺","死ね","障害","バカ"]
+			allow_latin: true
+			allow_kana: true
+			allow_kanji: false             # avoid accidental pickups; can be enabled later
+			debug: false
+
+# --- Storage for Learned Alias DB ---
+storage:
+	learned_alias_db:
+		enabled: false
+		path: "data/learned_alias.sqlite"
+# --- TTS (Style-BERT-VITS2) ---
+tts:
+	enabled: false
+	engine: "style_bert_vits2"
+	prefetch: false
+	debug_dump_wav: false
+# Disaster beep (OFF by default)
+enable_disaster_beep: false
+disaster_beep_min_interval_sec: 10      # clamp >= 8
+disaster_beep_freq_hz: 1000             # clamp 600..2000
+disaster_beep_duration_ms: 160          # clamp 80..400
+disaster_beep_gain: 0.25                # clamp 0.05..0.6
+disaster_beep_repeats: 1                # clamp 1..3
+disaster_beep_repeat_gap_ms: 120        # clamp 60..400
+# Emergency JP Chat Notification (OFF by default)
+enable_emergency_chat_jp: false
+
+# Cooldowns
+emergency_chat_cooldown_sec: 120         # normal emergency (60–180 recommended)
+disaster_chat_cooldown_sec: 10           # disaster-level (~10s, min 8)
+
+# Dedupe / formatting
+emergency_chat_dedupe_window_sec: 600    # prevent repeats beyond cooldown for same content hash
+emergency_chat_max_lines: 4
+emergency_chat_max_chars: 180            # clamp for VRChat chatbox limits; hard clamp <= 220
+emergency_chat_prefix: "【緊急】"
+disaster_chat_prefix: "【緊急】"
+
+# Gate thresholds (reuse existing levels; do not invent new ones)
+emergency_chat_resource_level: "danger"  # only danger triggers, not warn
+emergency_chat_error_burst_n: 3
+emergency_chat_error_burst_window_sec: 60

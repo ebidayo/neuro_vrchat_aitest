@@ -1,3 +1,133 @@
+# --- ルールベース返信・予約送信ロジック ---
+import random
+import time
+import threading
+
+# テンプレート
+_REPLY_TEMPLATES = {
+    "question": [
+        "なるほど、{short}。ちなみに{ask}",
+        "{short}！それで、{ask}",
+        "{short}ですね。ところで{ask}",
+        "{short}。ちなみに{ask}？",
+        "{short}！ちなみに{ask}？",
+    ],
+    "emotion": [
+        "{short}、大変そう。具体的には{ask}",
+        "{short}！どんな時にそう思う？",
+        "{short}、それはすごい。何が一番印象的？",
+        "{short}、詳しく教えて？",
+    ],
+    "greeting": [
+        "{short}！最近どう？",
+        "{short}、今日は何してた？",
+        "{short}、どこから来たの？",
+        "{short}！趣味はある？",
+    ],
+    "other": [
+        "{short}、それ面白いね。ちなみに{ask}？",
+        "{short}！他に何かある？",
+        "{short}、最近何かあった？",
+        "{short}。ちなみに好きなことは？",
+    ],
+}
+_ASKS = {
+    "question": ["他に気になることある？", "最近どう？", "何が一番大事？", "どんな時？"],
+    "emotion": ["何が一番つらい？", "どう乗り越えてる？", "一番嬉しかったことは？", "最近どう？"],
+    "greeting": ["最近楽しかったことは？", "どんな趣味がある？", "今日はどうだった？", "何か新しいことあった？"],
+    "other": ["最近ハマってることは？", "何かおすすめある？", "どんな音楽が好き？", "今後やりたいことは？"],
+}
+def _classify(text):
+    t = text.lower()
+    if "?" in t or "？" in t:
+        return "question"
+    if any(x in t for x in ["やばい", "無理", "最高", "つらい", "嬉しい", "楽しい", "悲しい", "すごい"]):
+        return "emotion"
+    if any(x in t for x in ["はじめまして", "こんにちは", "こんばんは", "おはよう", "自己紹介", "よろしく", "です。", "です！"]):
+        return "greeting"
+    return "other"
+def _extract_short(text):
+    s = text.strip().split("。")
+    return s[0][:16] if s and s[0] else text[:16]
+_reply_history = []  # (text, ts)
+pending_reply = {
+    "active": False,
+    "text": "",
+    "task": None,
+    "ts": 0.0
+}
+_last_chatbox_sent = 0.0
+_last_template_idx = {}
+def _make_reply(latest_user_text):
+    text = latest_user_text.get("text", "")
+    cat = _classify(text)
+    short = _extract_short(text)
+    templates = _REPLY_TEMPLATES[cat]
+    idx = random.randrange(len(templates))
+    if _last_template_idx.get(cat) == idx:
+        idx = (idx + 1) % len(templates)
+    _last_template_idx[cat] = idx
+    ask = random.choice(_ASKS[cat])
+    reply = templates[idx].format(short=short, ask=ask)
+    return reply
+def _can_send_chatbox(text):
+    now = time.monotonic()
+    global _last_chatbox_sent
+    if now - _last_chatbox_sent < 1.2:
+        return False
+    for t, ts in _reply_history[-8:]:
+        if t == text and now - ts < 30:
+            return False
+    return True
+def _send_chatbox(text, osc):
+    global _last_chatbox_sent
+    try:
+        if not _can_send_chatbox(text):
+            return
+        osc.send_chatbox(text, send_immediately=True, notify=True)
+        _reply_history.append((text, time.monotonic()))
+        _last_chatbox_sent = time.monotonic()
+    except Exception as e:
+        import traceback
+        print("[reply] send error:", e)
+        traceback.print_exc()
+def _vad_on_transcript(text, latest_user_text):
+    try:
+        reply = _make_reply(latest_user_text)
+        pending_reply["active"] = True
+        pending_reply["text"] = reply
+        pending_reply["ts"] = time.monotonic()
+        pending_reply["task"] = None
+    except Exception as e:
+        import traceback
+        print("[reply] transcript error:", e)
+        traceback.print_exc()
+def _vad_on_talk_end(sm_inst, osc):
+    if not pending_reply["active"]:
+        return
+    def do_send():
+        try:
+            _send_chatbox(pending_reply["text"], osc)
+        finally:
+            pending_reply["active"] = False
+            pending_reply["text"] = ""
+            pending_reply["task"] = None
+            pending_reply["ts"] = 0.0
+    delay = random.uniform(0.4, 0.9)
+    t = threading.Timer(delay, do_send)
+    pending_reply["task"] = t
+    t.start()
+def _vad_on_talk_start(sm_inst):
+    if pending_reply["active"]:
+        if pending_reply["task"]:
+            try:
+                pending_reply["task"].cancel()
+            except Exception:
+                pass
+        pending_reply["active"] = False
+        pending_reply["text"] = ""
+        pending_reply["task"] = None
+        pending_reply["ts"] = 0.0
 try:
     from speaker_tempo import compute_speaker_tempo
 except Exception:
@@ -168,15 +298,16 @@ def get_avatar_frame():
     except Exception as e:
         logging.debug(f"get_avatar_frame failed: {e}")
         return None
-    # --- Avatar hash config and sampler ---
-    avatar_hash_cfg = (cfg.get("vision", {}).get("avatar_hash", {}) if cfg else {})
-    avatar_sampler = AvatarHashSampler(
-        enabled=avatar_hash_cfg.get("enabled", False),
-        fps=avatar_hash_cfg.get("fps", 0.5),
-        ttl_sec=avatar_hash_cfg.get("ttl_sec", 120),
-        roi=avatar_hash_cfg.get("roi", {"x":0.34,"y":0.18,"w":0.32,"h":0.58}),
-        size=avatar_hash_cfg.get("size", 64),
-    )
+
+# --- Avatar hash config and sampler ---
+avatar_hash_cfg = (cfg.get("vision", {}).get("avatar_hash", {}) if 'cfg' in globals() else {})
+avatar_sampler = AvatarHashSampler(
+    enabled=avatar_hash_cfg.get("enabled", False),
+    fps=avatar_hash_cfg.get("fps", 0.5),
+    ttl_sec=avatar_hash_cfg.get("ttl_sec", 120),
+    roi=avatar_hash_cfg.get("roi", {"x":0.34,"y":0.18,"w":0.32,"h":0.58}),
+    size=avatar_hash_cfg.get("size", 64),
+)
 
 """Minimal runner that wires StateMachine -> SpeechBrain -> OscClient
 Provides a --demo mode that runs for a short time and emits dummy events to exercise ALERT/SEARCH.
@@ -190,15 +321,63 @@ import random
 from typing import Any
 
 from core.state_machine import StateMachine, State
+from core.emotion_afterglow import EmotionAfterglow
+from core.emergency_chat_notifier import EmergencyChatNotifier
+from core.emergency_level import get_emergency_level
+from core.error_burst import ErrorBurst
 from core.speech_brain import make_speech_plan, build_search_intro_plan, build_idle_presence_plan, build_starter_plan, build_search_result_plan, build_search_fail_plan, build_name_ask_plan, build_name_confirm_plan, build_name_saved_plan, build_name_retry_plan, build_forget_ack_plan
 from vrc.osc_client import OscClient
 
 logger = logging.getLogger(__name__)
 
 
+
 # Agent pipeline globals (can be set by demo_run based on config)
 AGENT_PIPELINE = None
 AGENTS_ENABLED = False
+
+
+# --- EmotionAfterglow instance (fail-soft, config-driven, deterministic) ---
+emotion_afterglow = None
+
+# --- EmergencyChatNotifier instance (fail-soft, config-driven, deterministic) ---
+emergency_chat_notifier = None
+error_burst = None
+try:
+    from core.determinism import TimeProvider
+    cfg = globals().get("cfg", {})
+    def _clamp(x, lo, hi):
+        try:
+            return max(lo, min(hi, float(x)))
+        except Exception:
+            return lo
+    emotion_afterglow = EmotionAfterglow(TimeProvider(), cfg, _clamp)
+    # EmergencyChatNotifier wiring
+    def _osc_chat_sender_jp(msg):
+        try:
+            osc = globals().get('osc', None)
+            if osc and hasattr(osc, 'send_chatbox'):
+                osc.send_chatbox(msg, send_immediately=True, notify=True)
+        except Exception:
+            pass
+    # Disaster beep player (optional)
+    def _beep_player(wav_bytes):
+        try:
+            from audio.audio_player import play_wav_bytes
+            play_wav_bytes(wav_bytes)
+        except Exception:
+            pass
+    beep_player = _beep_player if cfg.get('enable_disaster_beep', False) else None
+    if cfg.get('enable_emergency_chat_jp', False):
+        emergency_chat_notifier = EmergencyChatNotifier(_osc_chat_sender_jp, TimeProvider(), cfg, beep_player=beep_player)
+    # ErrorBurst instance (always created, but only used if needed)
+    n = int(cfg.get('emergency_chat_error_burst_n', 3))
+    w = int(cfg.get('emergency_chat_error_burst_window_sec', 60))
+    error_burst = ErrorBurst(n, w, TimeProvider())
+except Exception:
+    emotion_afterglow = None
+    emergency_chat_notifier = None
+    error_burst = None
 
 # --- TTSエンジン初期化（fail-soft） ---
 tts = None
@@ -299,15 +478,41 @@ def notify_chunk_done(sm: StateMachine) -> None:
 
 
 async def emit_chunk(chunk: dict, osc: OscClient, params_map: dict, state: State, sm: StateMachine, mode: str = "debug", now_ts=None) -> None:
-            # --- 話者別テンポ調整 ---
-            tempo = {'response_delay_ms': 0, 'idle_interval_scale': 1.0, 'prosody_speed_scale': 1.0}
-            speaker_key = chunk.get('speaker_key') if isinstance(chunk, dict) else None
-            speaker_store = globals().get('speaker_store', None)
-            if compute_speaker_tempo and speaker_key and speaker_store and state not in (State.ALERT, State.SEARCH, State.FOCUS):
-                try:
-                    tempo = compute_speaker_tempo(speaker_key, speaker_store, int(time.time()), globals().get('cfg', {}))
-                except Exception:
-                    tempo = {'response_delay_ms': 0, 'idle_interval_scale': 1.0, 'prosody_speed_scale': 1.0}
+    # --- Emergency JP Chat Notifier (additive, minimal, fail-soft) ---
+    global emergency_chat_notifier, error_burst
+    try:
+        if emergency_chat_notifier:
+            context = {
+                'resource_watcher': globals().get('resource_watcher', None),
+                'disaster_watch': globals().get('disaster_watch', None),
+                'cfg': globals().get('cfg', {}),
+                'error_burst': error_burst,
+                'now': emergency_chat_notifier.tp.now(),
+            }
+            level = get_emergency_level(context)
+            if level != 'none':
+                # Reason mapping: prefer resource danger, error burst, disaster
+                reason = None
+                if level == 'disaster':
+                    reason = 'disaster_watch'
+                elif context.get('resource_watcher') and getattr(context['resource_watcher'], 'last_level', None) == context['cfg'].get('emergency_chat_resource_level', 'danger'):
+                    reason = 'resource_danger'
+                elif error_burst and error_burst.is_burst(context['now']):
+                    reason = 'error_burst'
+                else:
+                    reason = 'resource_danger'
+                emergency_chat_notifier.maybe_notify(level, reason)
+    except Exception:
+        pass
+        # --- 話者別テンポ調整 ---
+        tempo = {'response_delay_ms': 0, 'idle_interval_scale': 1.0, 'prosody_speed_scale': 1.0}
+        speaker_key = chunk.get('speaker_key') if isinstance(chunk, dict) else None
+        speaker_store = globals().get('speaker_store', None)
+        if compute_speaker_tempo and speaker_key and speaker_store and state not in (State.ALERT, State.SEARCH, State.FOCUS):
+            try:
+                tempo = compute_speaker_tempo(speaker_key, speaker_store, int(time.time()), globals().get('cfg', {}))
+            except Exception:
+                tempo = {'response_delay_ms': 0, 'idle_interval_scale': 1.0, 'prosody_speed_scale': 1.0}
         # --- INTEREST→表情 係数: config駆動・安全クランプ ---
         DEFAULT_GAIN = 0.35
         DEFAULT_MAX = 0.6
@@ -363,8 +568,25 @@ async def emit_chunk(chunk: dict, osc: OscClient, params_map: dict, state: State
         valence = float(osc_map.get("N_Valence", 0.0))
         interest = float(osc_map.get("N_Interest", 0.0))
         arousal = float(osc_map.get("N_Arousal", 0.0))
-    except Exception:
+    except Exception as e:
+        # Record error for burst detector (minimal, deterministic)
+        if error_burst:
+            try:
+                error_burst.record_error(emergency_chat_notifier.tp.now())
+            except Exception:
+                pass
         pass
+
+    # --- Emotional Afterglow: apply afterglow fade to outgoing valence/interest (visual only, config-gated, fail-soft) ---
+    global emotion_afterglow
+    if emotion_afterglow and hasattr(emotion_afterglow, "enabled") and getattr(emotion_afterglow, "enabled", False):
+        try:
+            # Only apply afterglow to TALK/IDLE/THINK/ASIDE, not ALERT/SEARCH
+            sname = getattr(state, "name", str(state))
+            if sname not in ("ALERT", "SEARCH"):
+                valence, interest = emotion_afterglow.tick(valence, interest, state=sname)
+        except Exception:
+            pass
     prosody = None
     if map_prosody:
         try:
@@ -400,6 +622,14 @@ async def emit_chunk(chunk: dict, osc: OscClient, params_map: dict, state: State
                 ok = tts.synthesize(chunk.get("text", ""), prosody, tmp_wav_path)
                 if ok:
                     play_wav(tmp_wav_path)
+            # --- Afterglow: on speech emission end, trigger afterglow fade ---
+            if emotion_afterglow and hasattr(emotion_afterglow, "on_emit_end") and getattr(emotion_afterglow, "enabled", False):
+                try:
+                    sname = getattr(state, "name", str(state))
+                    if sname not in ("ALERT", "SEARCH"):
+                        emotion_afterglow.on_emit_end(valence, interest)
+                except Exception:
+                    pass
         except Exception:
             logger.warning("TTS/playback failed", exc_info=True)
     # --- 次チャンクのTTSプリフェッチ ---
@@ -520,7 +750,23 @@ def clear_tts_prefetcher():
     # wait the specified pause + speaker response delay
     pause = float(chunk.get("pause_ms", 120)) / 1000.0
     pause += float(tempo.get('response_delay_ms', 0)) / 1000.0
-    await asyncio.sleep(max(0.0, pause))
+    import asyncio
+    if hasattr(asyncio, 'sleep') and callable(asyncio.sleep):
+        # If in async context, use await
+        try:
+            coro = asyncio.sleep(max(0.0, pause))
+            if hasattr(coro, '__await__'):
+                # This is a coroutine, but we can't 'await' outside async, so just run it
+                import asyncio
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(coro)
+            else:
+                pass
+        except Exception:
+            pass
+    else:
+        import time
+        time.sleep(max(0.0, pause))
 
     # mark speech chunk done for queued interrupt handling
     try:

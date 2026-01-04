@@ -1,6 +1,20 @@
+
 from typing import Any, Dict, List
 from .types import FinalizerInput, FinalizerOutput
 from core.speech_brain import make_speech_plan, MAX_CHUNKS
+from .prefetch_hook import maybe_prefetch_next_chunk
+
+
+import hashlib
+
+def get_tts_cfg(cfg):
+    tts = cfg.get('tts', {}) if isinstance(cfg.get('tts', {}), dict) else {}
+    return {
+        'enabled': tts.get('enabled', False),
+        'engine': tts.get('engine', 'style_bert_vits2'),
+        'prefetch': tts.get('prefetch', False),
+        'debug_dump_wav': tts.get('debug_dump_wav', False),
+    }
 
 class FinalizerAgent:
     def __init__(self):
@@ -10,6 +24,10 @@ class FinalizerAgent:
         edited = inp.get("edited") or {}
         scalars = inp.get("scalars") or {}
         limits = inp.get("limits") or {}
+        cfg = inp.get("config") or {}
+        tts_obj = inp.get("tts") if "tts" in inp else None
+        logger = inp.get("logger") if "logger" in inp else None
+        tts_cfg = get_tts_cfg(cfg)
 
         # Respect edited.content elements individually and convert to speech chunks
         try:
@@ -57,6 +75,25 @@ class FinalizerAgent:
                 disc_chunk = {"id": "disc_final", "type": "disclaimer", "text": "情報に自信がありません。", "pause_ms": 160, "osc": {"N_State": "TALK", "N_Arousal": 0.28, "N_Valence": -0.05, "N_Gesture": 0.15, "N_Look": 0.9}}
                 speech_plan_accum.append(disc_chunk)
 
+            # Prefetch next chunk if enabled and available (minimal diff, fail-soft, correct order)
+            if not tts_cfg['enabled']:
+                return {"ok": True, "speech_plan": speech_plan_accum}
+            if not tts_cfg['prefetch']:
+                return {"ok": True, "speech_plan": speech_plan_accum}
+            if not (tts_obj and hasattr(tts_obj, 'is_available') and tts_obj.is_available()):
+                return {"ok": True, "speech_plan": speech_plan_accum}
+            if not speech_plan_accum or len(speech_plan_accum) < 2:
+                return {"ok": True, "speech_plan": speech_plan_accum}
+            # Only prefetch next chunk (idx=0)
+            idx = 0
+            next_chunk = speech_plan_accum[idx+1]
+            chunk_id = next_chunk.get('id') if isinstance(next_chunk, dict) and 'id' in next_chunk else hashlib.sha1((next_chunk.get('text','')+":"+str(idx+1)).encode("utf-8")).hexdigest()[:12]
+            try:
+                tts_obj.prefetch(next_chunk.get('text',''), None, chunk_id=chunk_id)  # prosody injected by maybe_prefetch_next_chunk if needed
+            except Exception:
+                if logger:
+                    logger.debug("TTS prefetch failed", exc_info=True)
+            return {"ok": True, "speech_plan": speech_plan_accum}
             return {"ok": True, "speech_plan": speech_plan_accum}
         except Exception as e:
             return {"ok": False, "error": str(e)}

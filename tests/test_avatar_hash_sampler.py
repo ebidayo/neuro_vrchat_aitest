@@ -1,9 +1,10 @@
+
 import time
 import pytest
 from unittest.mock import Mock
+pytest.importorskip("PIL.Image")
 from PIL import Image
 from core.vision.avatar_hash import compute_avatar_phash
-
 from main import AvatarHashSampler
 
 def make_img():

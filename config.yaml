@@ -1,3 +1,61 @@
+# --- Personality / Opinion / Debate ---
+personality:
+  opinion:
+    enabled: false
+    alpha: 0.01
+  debate:
+    enabled: false
+    hesitation:
+      enabled: true
+      prob: 0.20
+# --- Emergency / Disaster Mode ---
+emergency:
+  enabled: false
+  cooldown_sec: 10.0
+  beep_wav_path: "assets/beep.wav"
+  force_language_ja: true
+  active_hold_sec: 10.0
+# --- STT Self-Address Detection ---
+stt:
+  self_address:
+    enabled: true
+    name_aliases:
+      - "美空"
+      - "みそら"
+      - "ミソラ"
+      - "misora"
+      - "sora"
+      - "miso"
+      - "mira"
+      - "miku"
+# --- Learned Alias (Nickname) System ---
+    learned_alias:
+      enabled: false
+      min_len: 2
+      max_len: 8
+      init_weight: 0.10
+      inc_weight: 0.10
+      promote_threshold: 0.60
+      decay_tau_sec: 604800          # 7 days
+      max_entries: 64
+      ttl_context_sec: 300           # 5 min "addressed context" window
+      forbid_tokens: ["政治","選挙","宗教","差別","殺","死ね","障害","バカ"]
+      allow_latin: true
+      allow_kana: true
+      allow_kanji: false             # avoid accidental pickups; can be enabled later
+      debug: false
+
+# --- Storage for Learned Alias DB ---
+storage:
+  learned_alias_db:
+    enabled: false
+    path: "data/learned_alias.sqlite"
+# --- TTS (Style-BERT-VITS2) ---
+tts:
+  enabled: false
+  engine: "style_bert_vits2"
+  prefetch: false
+  debug_dump_wav: false
 # Example config for Phase1 (v1.2 expectations)
 
 # --- OSC face sensitivity presets ---

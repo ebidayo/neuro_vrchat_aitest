@@ -27,6 +27,69 @@ class State(enum.IntEnum):
 
 
 class StateMachine:
+                        # --- PR5: Deterministic deferral templates for judgment ---
+                        deferral_templates = ["ちょっと考えたい", "今は断言しない"]
+                        can_defer = (
+                            decision and not decision.addressed and
+                            not in_alert and
+                            not getattr(self, "pending_name_request", None) and
+                            not getattr(self, "pending_greet", None)
+                        )
+                        # Cooldown: at least 20s between deferrals
+                        if not hasattr(self, '_pr5_last_deferral_ts'):
+                            self._pr5_last_deferral_ts = 0.0
+                        deferral_cooldown = 20.0
+                        time_since_deferral = now_ts - getattr(self, '_pr5_last_deferral_ts', 0.0)
+                        do_deferral = False
+                        deferral_text = None
+                        if can_defer and time_since_deferral >= deferral_cooldown:
+                            # Deterministic gating: 15% chance, seeded by session_id + turn_index + transcript
+                            base4 = f"{session_id or ''}:{turn_index or ''}:{transcript or ''}:DEFERRAL"
+                            h4 = hashlib.sha256(base4.encode('utf-8')).digest()
+                            frac4 = h4[4] / 255.0
+                            if frac4 < 0.15:
+                                do_deferral = True
+                                idx = h4[5] % len(deferral_templates)
+                                deferral_text = deferral_templates[idx]
+                        if do_deferral and deferral_text:
+                            self._pr5_last_deferral_ts = now_ts
+                            logger.info(f"[PR5] Deferral: {deferral_text}")
+                            # Optionally, could emit as a reply (see aizuchi logic)
+                            return
+            emergency = None
+            def _get_emergency(self):
+                if self.emergency is not None:
+                    return self.emergency
+                try:
+                    from emergency import EmergencyController
+                    cfg = getattr(self, "cfg", {})
+                    emergency_cfg = cfg.get("emergency", {}) if isinstance(cfg, dict) else {}
+                    # Use time.time as fallback clock
+                    class _Clock:
+                        def now(self):
+                            return time.time()
+                    clock = getattr(self, "clock", None) or _Clock()
+                    # Use logger and beep_player if present
+                    logger = getattr(self, "logger", logger)
+                    beep_player = getattr(self, "beep_player", None)
+                    self.emergency = EmergencyController(emergency_cfg, clock, logger, beep_player)
+                except Exception:
+                    class DisabledEmergency:
+                        def is_enabled(self): return False
+                        def is_active(self): return False
+                        def should_suppress_stt(self): return False
+                        def should_suppress_opinion(self): return False
+                        def maybe_trigger(self, *a, **k):
+                            from emergency import EmergencyDecision
+                            return EmergencyDecision(False, "", "", "fail-soft", False)
+                        def reset(self): pass
+                    self.emergency = DisabledEmergency()
+                return self.emergency
+        _learned_alias_store = None
+    # PR2: ephemeral pending STT for VAD defer
+    _pending_stt: dict = None
+    # PR2.5: Ephemeral addressed context window for learned alias gating
+    _recent_addressed_until_ts: float = 0.0
     """Enhanced state machine for Phase1:
 
     - Maintains scalar internal state: valence/arousal/confidence/glitch/curiosity/social_pressure
@@ -298,6 +361,47 @@ class StateMachine:
         self.curiosity = max(0.0, self.curiosity - 0.05)
 
     def on_event(self, event: str, payload: dict | None = None, **kwargs) -> None:
+                # --- PR3: Emergency/ALERT preemption and STT suppression ---
+                emergency = self._get_emergency()
+                # Suppress STT events if emergency is active
+                if emergency.is_active():
+                    if event in ("stt_partial", "stt_final"):
+                        return
+                    # Allow emergency_trigger and reset
+                    if event not in ("emergency_trigger", "reset"):
+                        # All other events suppressed during emergency
+                        return
+                # Handle emergency trigger event
+                if event == "emergency_trigger":
+                    p = payload or {}
+                    message_ja = p.get("message_ja", "")
+                    reason = p.get("reason", "manual")
+                    decision = emergency.maybe_trigger(message_ja, reason=reason)
+                    if decision.should_alert:
+                        # Preempt to ALERT state
+                        self._prev_state = self.state
+                        self.state = State.ALERT
+                        # Stop TTS playback if possible (fail-soft)
+                        try:
+                            if hasattr(self, "tts") and hasattr(self.tts, "stop"):
+                                self.tts.stop()
+                        except Exception:
+                            pass
+                        # Output Japanese message via chatbox or fallback
+                        try:
+                            if hasattr(self, "chatbox") and hasattr(self.chatbox, "output"):
+                                self.chatbox.output(decision.message_ja)
+                            elif hasattr(self, "output_text"):
+                                self.output_text(decision.message_ja)
+                            else:
+                                logger.info(f"EMERGENCY: {decision.message_ja}")
+                        except Exception:
+                            logger.info(f"EMERGENCY: {decision.message_ja}")
+                        return
+                # --- End PR3 emergency integration ---
+            def is_opinion_suppressed(self) -> bool:
+                emergency = self._get_emergency()
+                return emergency.is_active()
         """Generic event interface for external triggers.
 
         Extended to support v1.2 event names (tick, vad_start/vad_end, stt_partial/stt_final,
@@ -335,25 +439,73 @@ class StateMachine:
                 if seq > prev_seq:
                     self.current_alert.update(p)
                     self._last_alert_was_update = True
-                    # small scalar nudges for updates
-                    self.glitch = min(1.0, self.glitch + 0.05 * int(p.get("severity", 0)))
-                else:
-                    # stale update ignored
-                    logger.debug("Stale alert update ignored: %s (known=%s)", seq, prev_seq)
+                from learned_alias import normalize_for_alias, extract_candidate_alias, filter_candidate
+                from learned_alias_manager import update_alias, get_confirmed_aliases
+                from learned_alias_store import InMemoryLearnedAliasStore, SqliteLearnedAliasStore
+            except Exception:
+                detect_self_address = None
+                AddressDecision = None
+                normalize_for_alias = None
+                extract_candidate_alias = None
+                filter_candidate = None
+                update_alias = None
+                get_confirmed_aliases = None
+                InMemoryLearnedAliasStore = None
+                SqliteLearnedAliasStore = None
+            # Config resolution (fail-soft, safe defaults)
+            cfg = getattr(self, "cfg", {}) if hasattr(self, "cfg") else {}
+            sa_cfg = cfg.get("stt", {}).get("self_address", {}) if isinstance(cfg.get("stt", {}), dict) else {}
+            la_cfg = sa_cfg.get("learned_alias", {})
+            la_enabled = bool(la_cfg.get("enabled", False))
+            # --- PR2.5: learned alias update (only if enabled and in addressed context) ---
+            now_ts = time.time()
+            if la_enabled and hasattr(self, "is_in_addressed_context") and self.is_in_addressed_context(now_ts):
+                # Lazy store creation (fail-soft)
+                if self._learned_alias_store is None:
+                    store = None
+                    try:
+                        db_cfg = cfg.get("storage", {}).get("learned_alias_db", {})
+                        if db_cfg.get("enabled", False) and SqliteLearnedAliasStore:
+                            store = SqliteLearnedAliasStore(db_cfg.get("path", "data/learned_alias.sqlite"), max_entries=int(la_cfg.get("max_entries", 64)))
+                        else:
+                            store = InMemoryLearnedAliasStore(max_entries=int(la_cfg.get("max_entries", 64)))
+                    except Exception:
+                        store = InMemoryLearnedAliasStore(max_entries=int(la_cfg.get("max_entries", 64))) if InMemoryLearnedAliasStore else None
+                    self._learned_alias_store = store
+                store = self._learned_alias_store
+                if store and normalize_for_alias and extract_candidate_alias and filter_candidate and update_alias:
+                    norm = normalize_for_alias(transcript)
+                    candidates = extract_candidate_alias(norm,
+                        min_len=int(la_cfg.get("min_len", 2)),
+                        max_len=int(la_cfg.get("max_len", 8)),
+                        forbid_tokens=la_cfg.get("forbid_tokens", []),
+                        allow_latin=la_cfg.get("allow_latin", True),
+                        allow_kana=la_cfg.get("allow_kana", True),
+                        allow_kanji=la_cfg.get("allow_kanji", False),
+                    )
+                    for alias in candidates:
+                        if filter_candidate(alias, la_cfg):
+                            update_alias(store, alias, now_ts, la_cfg)
+                    # Prune after update
+                    try:
+                        store.prune(now_ts, int(la_cfg.get("max_entries", 64)), float(la_cfg.get("drop_weight_below", 0.05)), float(la_cfg.get("decay_tau_sec", 604800)))
+                    except Exception:
+                        pass
+                # For self-address scoring, get confirmed aliases
+                confirmed_aliases = get_confirmed_aliases(store, la_cfg) if store and get_confirmed_aliases else []
             else:
-                # no matching alert; treat as new
-                self.on_event("alert_new", p)
-            return
-
-        if event == "alert_clear":
-            # clear alert and return to previous
-            # keep current_alert for potential clear-speech handling if needed
-            if self.state == State.ALERT:
-                self._enter_state(self._prev_state)
-            # mark cleared
-            if self.current_alert:
-                self.current_alert["cleared"] = True
-            return
+                confirmed_aliases = []
+            # --- End PR2.5 learned alias update ---
+            aliases = list(sa_cfg.get("name_aliases", []))
+            sa_debug = bool(sa_cfg.get("debug", False))
+            if detect_self_address and sa_enabled:
+                try:
+                    decision = detect_self_address(transcript, name_aliases=aliases, enable_debug_reason=sa_debug, confirmed_aliases=confirmed_aliases)
+                except Exception:
+                    decision = AddressDecision(addressed=False, score=0.0, reason="fail-soft") if AddressDecision else None
+            else:
+                decision = AddressDecision(addressed=True, score=1.0, reason="disabled") if AddressDecision else None
+            response_strength = "high" if (decision and decision.addressed) else "low"
 
         if event == "start_search" or event == "net_query":
             # network-driven searches allowed; payload may contain query
@@ -404,44 +556,208 @@ class StateMachine:
         if event == "stt_final":
             # payload: {text:..., speaker_id:..., speaker_confidence:..., speaker_alias:...}
             p = payload or {}
-            # If speaker info is present, possibly adjust focus/attitude
+            transcript = p.get("text") or (getattr(p, "text", None) if hasattr(p, "text") else None)
+            if not transcript or not str(transcript).strip():
+                return
+            # --- PR2: Self-address detection and response_strength ---
+            try:
+                from self_address import detect_self_address, AddressDecision
+            except Exception:
+                detect_self_address = None
+                AddressDecision = None
+            # Config resolution (fail-soft, safe defaults)
+            cfg = getattr(self, "cfg", {}) if hasattr(self, "cfg") else {}
+            sa_cfg = cfg.get("stt", {}).get("self_address", {}) if isinstance(cfg.get("stt", {}), dict) else {}
+            sa_enabled = bool(sa_cfg.get("enabled", True))
+            aliases = list(sa_cfg.get("name_aliases", []))
+            sa_debug = bool(sa_cfg.get("debug", False))
+            if detect_self_address and sa_enabled:
+                try:
+                    decision = detect_self_address(transcript, name_aliases=aliases, enable_debug_reason=sa_debug)
+                except Exception:
+                    decision = AddressDecision(addressed=False, score=0.0, reason="fail-soft") if AddressDecision else None
+            else:
+                decision = AddressDecision(addressed=True, score=1.0, reason="disabled") if AddressDecision else None
+            response_strength = "high" if (decision and decision.addressed) else "low"
+            # --- PR5: Deterministic response delay polish ---
+            # Only delay if not in ALERT/EMERGENCY
+            emergency = self._get_emergency() if hasattr(self, '_get_emergency') else None
+            in_alert = (self.state == State.ALERT) or (emergency and emergency.is_active())
+            if not in_alert:
+                # Use session_id and turn_index if available, else fallback to time.time()
+                session_id = getattr(self, 'session_id', None)
+                turn_index = getattr(self, 'turn_index', None)
+                # Use a deterministic hash for delay
+                import hashlib
+                base = f"{session_id or ''}:{turn_index or ''}:{transcript or ''}:{response_strength}"
+                h = hashlib.sha256(base.encode('utf-8')).digest()
+                # 200–600ms for normal, 120–320ms for debate
+                is_debate = False
+                try:
+                    # Use debate flag from payload or context if available
+                    is_debate = bool(p.get('debate', False))
+                except Exception:
+                    pass
+                if is_debate:
+                    min_delay, max_delay = 0.12, 0.32
+                else:
+                    min_delay, max_delay = 0.2, 0.6
+                # Lower response_strength = longer delay
+                frac = h[0] / 255.0
+                if response_strength == "high":
+                    delay = min_delay + (max_delay - min_delay) * (frac * 0.5)
+                else:
+                    delay = min_delay + (max_delay - min_delay) * (0.5 + frac * 0.5)
+                # Use injected clock if available
+                import time as _pr5_time
+                clock = getattr(self, 'clock', None)
+                now = clock.now() if clock and hasattr(clock, 'now') else _pr5_time.time()
+                # Fail-soft: sleep, but never block event loop if async
+                try:
+                    import asyncio
+                    if asyncio.iscoroutinefunction(getattr(self, 'on_event', None)):
+                        # If on_event is async, use await asyncio.sleep
+                        # (not expected in current code, but future-proof)
+                        pass
+                    else:
+                        _pr5_time.sleep(delay)
+                except Exception:
+                    try:
+                        _pr5_time.sleep(delay)
+                    except Exception:
+                        pass
+                # Optionally log delay for debug
+                if sa_debug:
+                    logger.info(f"[PR5] Deterministic response delay: {delay:.3f}s (debate={is_debate}, strength={response_strength})")
+
+            # --- PR5: Restraint: skip reply on low response_strength and high turn density ---
+            # Track recent AI replies (TALK) timestamps for density calculation
+            if not hasattr(self, '_pr5_talk_timestamps'):
+                self._pr5_talk_timestamps = []
+            now_ts = time.time()
+            # Remove old entries (older than 30s)
+            self._pr5_talk_timestamps = [ts for ts in self._pr5_talk_timestamps if now_ts - ts < 30.0]
+            # Calculate density (replies per 30s)
+            turn_density = len(self._pr5_talk_timestamps)
+            # Deterministic skip: if response_strength is low and turn_density >= 3, skip reply
+            skip_reply = False
+            if response_strength == "low" and turn_density >= 3:
+                # Deterministic: use session_id + turn_index + transcript
+                base2 = f"{session_id or ''}:{turn_index or ''}:{transcript or ''}:SKIP"
+                h2 = hashlib.sha256(base2.encode('utf-8')).digest()
+                # 50% chance to skip (can tune)
+                frac2 = h2[1] / 255.0
+                if frac2 < 0.5:
+                    skip_reply = True
+            if skip_reply:
+                if sa_debug:
+                    logger.info(f"[PR5] Skipping reply due to restraint: response_strength=low, turn_density={turn_density}")
+                return
+            # Record this reply timestamp for future density checks
+            self._pr5_talk_timestamps.append(now_ts)
+
+            # --- PR5: Controlled aizuchi (backchannel) responses ---
+            # Only if addressed=False, vad_speaking=False, no pending strong intent, not in ALERT
+            aizuchi_candidates = ["うん", "なるほど", "たしかに"]
+            can_aizuchi = (
+                decision and not decision.addressed and
+                not getattr(self, "vad_speaking", False) and
+                not getattr(self, "pending_name_request", None) and
+                not getattr(self, "pending_greet", None) and
+                not in_alert
+            )
+            # Cooldown: at least 10s between aizuchi
+            if not hasattr(self, '_pr5_last_aizuchi_ts'):
+                self._pr5_last_aizuchi_ts = 0.0
+            aizuchi_cooldown = 10.0
+            time_since_aizuchi = now_ts - getattr(self, '_pr5_last_aizuchi_ts', 0.0)
+            do_aizuchi = False
+            aizuchi_text = None
+            if can_aizuchi and time_since_aizuchi >= aizuchi_cooldown:
+                # Deterministic gating: 40% chance, seeded by session_id + turn_index + transcript
+                base3 = f"{session_id or ''}:{turn_index or ''}:{transcript or ''}:AIZUCHI"
+                h3 = hashlib.sha256(base3.encode('utf-8')).digest()
+                frac3 = h3[2] / 255.0
+                if frac3 < 0.4:
+                    do_aizuchi = True
+                    # Deterministic aizuchi selection
+                    idx = h3[3] % len(aizuchi_candidates)
+                    aizuchi_text = aizuchi_candidates[idx]
+            if do_aizuchi and aizuchi_text:
+                self._pr5_last_aizuchi_ts = now_ts
+                # Emit aizuchi as a minimal TALK event (simulate reply)
+                logger.info(f"[PR5] Aizuchi: {aizuchi_text}")
+                # Optionally, could call self._enter_state(State.TALK) and emit via chatbox/output
+                # For minimal diff, just log and return (no full reply)
+                # If you want to actually emit, uncomment below:
+                # self._enter_state(State.TALK)
+                # if hasattr(self, "chatbox") and hasattr(self.chatbox, "output"):
+                #     self.chatbox.output(aizuchi_text)
+                # elif hasattr(self, "output_text"):
+                #     self.output_text(aizuchi_text)
+                return
+            # PR2.5: addressed context window for learned alias
+            ttl_context_sec = float(sa_cfg.get("learned_alias", {}).get("ttl_context_sec", 300))
+            now_ts = time.time()
+            if response_strength == "high":
+                self._recent_addressed_until_ts = now_ts + ttl_context_sec
+                def is_in_addressed_context(self, now_ts=None):
+                    """Return True if within addressed context window (for learned alias gating)."""
+                    now_ts = now_ts or time.time()
+                    return now_ts <= getattr(self, "_recent_addressed_until_ts", 0.0)
+            # Optionally log only if addressed or debug
+            if (decision and (decision.addressed or sa_debug)):
+                logger.info(f"Self-address: score={getattr(decision,'score',None)} reason={getattr(decision,'reason','')} strength={response_strength}")
+            # --- PR2: VAD no-interruption logic ---
+            vad_speaking = getattr(self, "vad_speaking", False)
+            now_ts = time.time()
+            if vad_speaking:
+                # Defer: store pending STT (ephemeral, TTL 2.0s)
+                import hashlib
+                norm = transcript.strip().lower()
+                transcript_hash = hashlib.sha1(norm.encode("utf-8")).hexdigest()
+                self._pending_stt = {
+                    "ts": now_ts,
+                    "transcript_hash": transcript_hash,
+                    "response_strength": response_strength,
+                }
+                return
+            # If pending STT exists and VAD is now silent, release if TTL not expired
+            if self._pending_stt:
+                pending = self._pending_stt
+                if now_ts - pending["ts"] <= 2.0:
+                    # Use pending response_strength
+                    response_strength = pending["response_strength"]
+                    self._pending_stt = None
+                else:
+                    self._pending_stt = None
+            # --- Existing focus/attitude logic (unchanged, but can use response_strength downstream) ---
             sid = p.get("speaker_id")
             sconf = float(p.get("speaker_confidence", 0.0)) if p.get("speaker_confidence") is not None else 0.0
             if sid and sconf >= getattr(self, "speaker_threshold", 0.75):
                 logger.info("Recognized active speaker %s (conf=%.2f)", sid, sconf)
                 self.active_speaker_id = sid
-                # nudges to reflect increased attention
                 self.social_pressure = min(1.0, self.social_pressure + 0.2)
                 self.confidence = min(1.0, self.confidence + 0.1)
             else:
-                # unknown or low confidence
                 self.active_speaker_id = None
-
-            # optionally record alias (e.g., 'unknown_1'); main may pass this if available
             alias = p.get("speaker_alias")
             if alias:
                 self.active_speaker_alias = alias
-                # update streak counters for stability gating
                 try:
                     conf = float(p.get("speaker_confidence", 0.0)) if p.get("speaker_confidence") is not None else 0.0
                 except Exception:
                     conf = 0.0
-                # if alias is same as previous and meets confidence threshold, increment
                 if alias == self._speaker_streak_alias:
                     if conf >= self.name_ask_min_conf:
                         self._speaker_streak_count += 1
                     else:
-                        # low confidence for this alias does not increase streak
                         self._speaker_streak_count = max(0, self._speaker_streak_count - 1)
                 else:
-                    # new alias, start streak only if conf sufficient
                     self._speaker_streak_alias = alias
                     self._speaker_streak_count = 1 if conf >= self.name_ask_min_conf else 0
-
                 logger.debug("Speaker streak updated: alias=%s count=%s conf=%.2f", self._speaker_streak_alias, self._speaker_streak_count, conf)
-                # If this alias appears stable and prompting conditions are met, create pending name request
                 if self.should_prompt_name(alias, conf, now=time.time(), has_profile=False, state=self.state):
-                    # avoid duplicate pending requests
                     if not self.pending_name_request:
                         self.pending_name_request = {"alias": alias, "asked_at": time.time(), "stage": "ask", "name_candidate": None, "confidence": conf}
                         self._last_name_request_ts = time.time()
@@ -449,16 +765,11 @@ class StateMachine:
                         logger.info("Auto-created pending name request for %s due to stable streak", alias)
                         self._maybe_interrupt(State.TALK, reason={"name_request": True}, allow_mid_chunk=False)
                         self._notify()
-
-                # GREET decision: if speaker is known (has_profile indicated in payload), not in name flow, and gate passes
                 has_profile = bool(p.get("has_profile", False))
                 speaker_key = p.get("speaker_key") or alias
-                # allow test code to pass a datetime via payload for deterministic greet_type selection
                 now_dt = p.get("now_dt")
                 if has_profile and not self.pending_name_request and self.should_schedule_greet(alias, conf, now=time.time(), has_profile=has_profile, state=self.state, now_dt=now_dt):
-                    # prepare greet; use name if present in payload (main can pass display_name) else main should look up later
                     name = p.get("display_name") or None
-                    # decide greet_type using now_dt if provided, else use current local time
                     try:
                         if now_dt:
                             from core.utils.time_utils import decide_greet_type_from_dt
@@ -474,8 +785,6 @@ class StateMachine:
                     logger.info("Pending greet scheduled for %s (key=%s) greet_type=%s", alias, speaker_key, gt)
                     self._maybe_interrupt(State.GREET, reason={"greet": True}, allow_mid_chunk=False)
                     self._notify()
-
-            # also reduce curiosity slightly on hearing final transcription
             if p.get("text"):
                 self.curiosity = max(0.0, self.curiosity - 0.05)
             return
