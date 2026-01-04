@@ -28,7 +28,9 @@ def test_denylist_blocks():
     assert not can_debate(ctx)
 
 def test_emergency_blocks():
-    class E: def is_active(self): return True
+    class E:
+        def is_active(self):
+            return True
     ctx = {
         "behavior_mode": "TALK_PRIMARY",
         "addressed": True,

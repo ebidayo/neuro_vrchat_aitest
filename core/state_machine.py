@@ -27,37 +27,37 @@ class State(enum.IntEnum):
 
 
 class StateMachine:
-                        # --- PR5: Deterministic deferral templates for judgment ---
-                        deferral_templates = ["ちょっと考えたい", "今は断言しない"]
-                        can_defer = (
-                            decision and not decision.addressed and
-                            not in_alert and
-                            not getattr(self, "pending_name_request", None) and
-                            not getattr(self, "pending_greet", None)
-                        )
-                        # Cooldown: at least 20s between deferrals
-                        if not hasattr(self, '_pr5_last_deferral_ts'):
-                            self._pr5_last_deferral_ts = 0.0
-                        deferral_cooldown = 20.0
-                        time_since_deferral = now_ts - getattr(self, '_pr5_last_deferral_ts', 0.0)
-                        do_deferral = False
-                        deferral_text = None
-                        if can_defer and time_since_deferral >= deferral_cooldown:
-                            # Deterministic gating: 15% chance, seeded by session_id + turn_index + transcript
-                            base4 = f"{session_id or ''}:{turn_index or ''}:{transcript or ''}:DEFERRAL"
-                            h4 = hashlib.sha256(base4.encode('utf-8')).digest()
-                            frac4 = h4[4] / 255.0
-                            if frac4 < 0.15:
-                                do_deferral = True
-                                idx = h4[5] % len(deferral_templates)
-                                deferral_text = deferral_templates[idx]
-                        if do_deferral and deferral_text:
-                            self._pr5_last_deferral_ts = now_ts
-                            logger.info(f"[PR5] Deferral: {deferral_text}")
-                            # Optionally, could emit as a reply (see aizuchi logic)
-                            return
-            emergency = None
-            def _get_emergency(self):
+    # --- PR5: Deterministic deferral templates for judgment ---
+    deferral_templates = ["ちょっと考えたい", "今は断言しない"]
+
+    def _get_emergency(self):
+        if getattr(self, 'emergency', None) is not None:
+            return self.emergency
+        try:
+            from emergency import EmergencyController
+            cfg = getattr(self, "cfg", {})
+            emergency_cfg = cfg.get("emergency", {}) if isinstance(cfg, dict) else {}
+            # Use time.time as fallback clock
+            class _Clock:
+                def now(self):
+                    return time.time()
+            clock = getattr(self, "clock", None) or _Clock()
+            # Use logger and beep_player if present
+            logger = getattr(self, "logger", logger)
+            beep_player = getattr(self, "beep_player", None)
+            self.emergency = EmergencyController(emergency_cfg, clock, logger, beep_player)
+        except Exception:
+            class DisabledEmergency:
+                def is_enabled(self): return False
+                def is_active(self): return False
+                def should_suppress_stt(self): return False
+                def should_suppress_opinion(self): return False
+                def maybe_trigger(self, *a, **k):
+                    from emergency import EmergencyDecision
+                    return EmergencyDecision(False, "", "", "fail-soft", False)
+                def reset(self): pass
+            self.emergency = DisabledEmergency()
+        return self.emergency
                 if self.emergency is not None:
                     return self.emergency
                 try:

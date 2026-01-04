@@ -4,12 +4,14 @@ from typing import Optional, Callable
 import time
 
 class AvatarHashSampler:
-    def __init__(self, get_roi_image_callable: Callable[[], 'Image.Image'], interval_sec: float, ttl_sec: float, cooldown_on_error_sec: float, logger=None):
+    def __init__(self, get_roi_image_callable: Callable[[], 'Image.Image'] = None, interval_sec: float = 1.0, ttl_sec: float = 60.0, cooldown_on_error_sec: float = 5.0, logger=None, enabled: bool = False, **kwargs):
         self.get_roi_image_callable = get_roi_image_callable
         self.interval_sec = interval_sec
         self.ttl_sec = ttl_sec
         self.cooldown_on_error_sec = cooldown_on_error_sec
         self.logger = logger or logging.getLogger(__name__)
+        self.enabled = bool(enabled)
+        # Ignore unknown kwargs for backward compatibility
         self._lock = threading.Lock()
         self._last_hash = None
         self._last_hash_ts = 0.0
