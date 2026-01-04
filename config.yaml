@@ -1,0 +1,61 @@
+# Example config for Phase1 (v1.2 expectations)
+
+# --- OSC face sensitivity presets ---
+# 控えめ（リアル寄り・落ち着いた表情）
+# osc:
+#   face_interest_gain: 0.30
+#   face_interest_max:  0.55
+
+# 標準（おすすめ）
+osc:
+  face_interest_gain: 0.35
+  face_interest_max:  0.60
+  ip: "127.0.0.1"
+  port: 9000
+  parameter_prefix: "/avatar/parameters"
+  max_hz: 10
+
+# アニメ寄り（表情が分かりやすい）
+# osc:
+#   face_interest_gain: 0.40
+#   face_interest_max:  0.65
+
+mode: debug
+
+params:
+  state: "Emotion"        # int (Shinano Emotion)
+  gesture: "Face"         # int (Shinano Face expression)
+  look_x: "LookX"         # float (-1..1)
+  look_y: "LookY"         # float (-1..1)
+  arousal: "TalkSpeed"    # float (0..1)
+  valence: "Mood"         # float (-1..1)
+  glitch: "Blink"         # float (0..1)
+
+timeouts:
+  alert_to_search_delay: 3.0
+  search_timeout: 8.0
+  search_max_duration: 30.0
+  talk_silence_timeout: 30.0
+  error_recover_time: 5.0
+
+cache:
+  news_ttl_seconds: 3600   # 1 hour
+  tech_ttl_seconds: 14400  # 4 hours
+  deep_ttl_seconds: 86400  # 24 hours
+
+starter:
+  idle_sec: 10
+  cooldown_sec: 20
+  reply_window_sec: 20
+  starters:
+    - "あの、ちょっといいですか？"
+    - "ねえ、ちょっと聞いていい？"
+    - "すみません、ちょっと話してもいいですか？"
+
+# Optional user location for geo-based tsunami distance estimates
+user_location:
+  label: "Tokyo (assumed)"
+  lat: 35.681236
+  lon: 139.767125
+  # coast_distance_km: null  # override with a known distance to the coast if desired
+

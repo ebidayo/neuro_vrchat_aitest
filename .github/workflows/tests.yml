@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements-dev.txt) { python -m pip install -r requirements-dev.txt }
+          if (Test-Path requirements.txt) { python -m pip install -r requirements.txt }
+
+      - name: Run unit tests
+        run: |
+          python -m pytest -q
+
+      - name: Smoke-run speech plan sampler
+        run: |
+          python -u print_speech_plan_samples.py --seed 123 --cases 2
+
+  smoke_agents:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements-dev.txt) { python -m pip install -r requirements-dev.txt }
+          if (Test-Path requirements.txt) { python -m pip install -r requirements.txt }
+
+      - name: Smoke (agents wiring)
+        run: |
+          python -m pytest -q tests/test_demo_agents_smoke.py
