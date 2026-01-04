@@ -58,34 +58,8 @@ class StateMachine:
                 def reset(self): pass
             self.emergency = DisabledEmergency()
         return self.emergency
-                if self.emergency is not None:
-                    return self.emergency
-                try:
-                    from emergency import EmergencyController
-                    cfg = getattr(self, "cfg", {})
-                    emergency_cfg = cfg.get("emergency", {}) if isinstance(cfg, dict) else {}
-                    # Use time.time as fallback clock
-                    class _Clock:
-                        def now(self):
-                            return time.time()
-                    clock = getattr(self, "clock", None) or _Clock()
-                    # Use logger and beep_player if present
-                    logger = getattr(self, "logger", logger)
-                    beep_player = getattr(self, "beep_player", None)
-                    self.emergency = EmergencyController(emergency_cfg, clock, logger, beep_player)
-                except Exception:
-                    class DisabledEmergency:
-                        def is_enabled(self): return False
-                        def is_active(self): return False
-                        def should_suppress_stt(self): return False
-                        def should_suppress_opinion(self): return False
-                        def maybe_trigger(self, *a, **k):
-                            from emergency import EmergencyDecision
-                            return EmergencyDecision(False, "", "", "fail-soft", False)
-                        def reset(self): pass
-                    self.emergency = DisabledEmergency()
-                return self.emergency
-        _learned_alias_store = None
+        
+    _learned_alias_store = None
     # PR2: ephemeral pending STT for VAD defer
     _pending_stt: dict = None
     # PR2.5: Ephemeral addressed context window for learned alias gating
