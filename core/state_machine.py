@@ -373,9 +373,9 @@ class StateMachine:
                             logger.info(f"EMERGENCY: {decision.message_ja}")
                         return
                 # --- End PR3 emergency integration ---
-            def is_opinion_suppressed(self) -> bool:
-                emergency = self._get_emergency()
-                return emergency.is_active()
+    def is_opinion_suppressed(self) -> bool:
+        emergency = self._get_emergency()
+        return emergency.is_active()
         """Generic event interface for external triggers.
 
         Extended to support v1.2 event names (tick, vad_start/vad_end, stt_partial/stt_final,
