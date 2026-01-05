@@ -32,13 +32,16 @@ def run_demo_smoke(
             plans_count += 1
     if (not bool(agents_enabled)) or bool(force_idle_presence):
         chunks.append({"type": "idle_presence", "text": "...", "i": 0})
-        states.append("IDLE")
+        if "IDLE" not in states:
+            states.append("IDLE")
         if "IDLE" not in emitted_states:
             emitted_states.append("IDLE")
     if bool(agents_enabled):
         chunks.append({"type": "agents", "text": "agents_enabled", "i": 0})
-        states.append("SEARCH")
-        emitted_states.append("SEARCH")
+        if "SEARCH" not in states:
+            states.append("SEARCH")
+        if "SEARCH" not in emitted_states:
+            emitted_states.append("SEARCH")
     idle_presence_emits = sum(1 for c in chunks if c.get("type") == "idle_presence")
     # Ensure plans is always an int, emitted_states is always a list of strings
     out = {
@@ -48,7 +51,7 @@ def run_demo_smoke(
         "seed": int(seed),
         "events": events,
         "chunks": chunks,
-        "states": states,
+        "states": list(states),
         "idle_presence_emits": idle_presence_emits,
     }
     out["plans"] = int(plans_count)
