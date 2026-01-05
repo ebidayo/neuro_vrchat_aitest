@@ -24,21 +24,26 @@ class InMemoryLearnedAliasStore(LearnedAliasStore):
         self._lock = threading.Lock()
         self._entries = {}
         self._max_entries = max_entries
+    def get(self, alias: str) -> Optional[AliasEntry]:
+        with self._lock:
+            return self._entries.get(alias)
+
     def get_all(self) -> List[AliasEntry]:
         with self._lock:
             return sorted(self._entries.values(), key=lambda e: (-e.last_seen_ts, e.alias))
-    def upsert(self, alias: str, weight: float, last_seen_ts: float, count: int) -> None:
+
+    def upsert(self, entry: AliasEntry) -> None:
         with self._lock:
-            prev = self._entries.get(alias)
-            confirmed = weight >= 0.6
-            self._entries[alias] = AliasEntry(alias, round(weight, 4), last_seen_ts, count, confirmed)
-    def prune(self, now_ts: float) -> None:
+            self._entries[entry.alias] = entry
+
+    def prune(self, now_ts: float, max_entries: int = None, drop_below: float = 0.05, decay_tau_sec: float = None) -> None:
         with self._lock:
-            # Drop entries with weight < 0.05
-            self._entries = {k: v for k, v in self._entries.items() if v.weight >= 0.05}
+            # Drop entries with weight < drop_below
+            self._entries = {k: v for k, v in self._entries.items() if v.weight >= drop_below}
             # Keep max_entries newest by last_seen_ts, tie-break by alias
+            max_e = max_entries if max_entries is not None else self._max_entries
             all_sorted = sorted(self._entries.values(), key=lambda e: (-e.last_seen_ts, e.alias))
-            self._entries = {e.alias: e for e in all_sorted[:self._max_entries]}
+            self._entries = {e.alias: e for e in all_sorted[:max_e]}
 
 try:
     import sqlite3

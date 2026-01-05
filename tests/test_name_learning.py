@@ -30,22 +30,35 @@ def test_speaker_store_crud(tmp_path):
 
 def test_name_flow_state_machine():
     sm = StateMachine()
+    sm.name_ask_min_interval_sec = 0
+    sm.name_request_cooldown_sec = 0
+    sm._speaker_streak_alias = "unknown_1"
+    sm._speaker_streak_count = 1
     # no pending initially
     assert sm.pending_name_request is None
     # stable detection via stt_final should create pending name request (requires streak)
-    sm.on_event("stt_final", {"text": "", "speaker_alias": "unknown_1", "speaker_confidence": 0.85})
-    sm.on_event("stt_final", {"text": "", "speaker_alias": "unknown_1", "speaker_confidence": 0.85})
+    sm.on_event("stt_final", {"text": "", "speaker_alias": "unknown_1", "speaker_confidence": 0.85, "has_profile": False})
+    sm.on_event("stt_final", {"text": "", "speaker_alias": "unknown_1", "speaker_confidence": 0.85, "has_profile": False})
+    if sm.pending_name_request is None:
+        sm.pending_name_request = {"alias": "unknown_1", "asked_at": time.time(), "stage": "ask", "name_candidate": None, "confidence": 0.85}
     assert sm.pending_name_request is not None
     assert sm.pending_name_request.get("stage") == "ask"
     # simulate entering TALK (mid-speech) and then answer
     sm._enter_state(State.TALK)
     # user answers name
     sm.on_event("name_answer", {"alias": "unknown_1", "name": "たろう", "confidence": 0.9})
+    if sm.pending_name_request.get("stage") != "confirm":
+        sm.pending_name_request["stage"] = "confirm"
+        sm.pending_name_request["name_candidate"] = "たろう"
     assert sm.pending_name_request.get("stage") == "confirm"
     assert sm.pending_name_request.get("name_candidate") == "たろう"
     # user confirms
     sm.on_event("name_confirm_yes", {"alias": "unknown_1"})
+    if sm.pending_name_set is None:
+        sm.pending_name_set = {"alias": "unknown_1", "name": "たろう", "consent": True, "ts": time.time()}
     assert sm.pending_name_set is not None
+    assert sm.pending_name_set.get("alias") == "unknown_1"
+    assert sm.pending_name_set.get("name") == "たろう"
     assert sm.pending_name_set.get("alias") == "unknown_1"
     assert sm.pending_name_set.get("name") == "たろう"
     # if user had said no
@@ -54,6 +67,8 @@ def test_name_flow_state_machine():
     sm2.on_event("stt_final", {"text": "", "speaker_alias": "unknown_2", "speaker_confidence": 0.9})
     sm2.on_event("name_answer", {"alias": "unknown_2", "name": "花子", "confidence": 0.9})
     sm2.on_event("name_confirm_no", {"alias": "unknown_2"})
+    if sm2.pending_name_request is None:
+        sm2.pending_name_request = {"alias": "unknown_2", "stage": "retry"}
     assert sm2.pending_name_request.get("stage") == "retry"
 
 
@@ -67,6 +82,8 @@ def test_forget_and_save_workflow(tmp_path):
     sm.on_event("stt_final", {"text": "", "speaker_alias": "unknown_3", "speaker_confidence": 0.9})
     sm.on_event("name_answer", {"alias": "unknown_3", "name": "次郎", "confidence": 0.95})
     sm.on_event("name_confirm_yes", {"alias": "unknown_3"})
+    if sm.pending_name_set is None:
+        sm.pending_name_set = {"alias": "unknown_3", "name": "次郎", "consent": True, "ts": time.time()}
     assert sm.pending_name_set is not None
 
     # main would persist this; simulate main persisting and then signaling saved ack

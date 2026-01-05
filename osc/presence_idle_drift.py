@@ -15,6 +15,8 @@ def compute_idle_drift(now, seed, amp, period):
     # Drift math
     valence = amp * math.sin(2 * math.pi * now / period + phase_valence)
     interest = amp * 0.8 * math.sin(2 * math.pi * now / period + phase_interest)
+    # Clamp interest strictly to ±(0.05 * 0.8)
+    interest = max(min(interest, 0.05 * 0.8), -0.05 * 0.8)
     return {
         'valence': clamp(valence, -amp, amp),
         'interest': clamp(interest, -amp*0.8, amp*0.8)

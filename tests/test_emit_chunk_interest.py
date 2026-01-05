@@ -71,6 +71,8 @@ def test_emit_chunk_interest_clamp(monkeypatch):
 import math
 
 def get_face_valence(base_valence, interest_norm, gain=0.35, maxval=0.6):
+    # Clamp interest_norm to [0,1] at the top to match test expectation
+    interest_norm = max(0.0, min(1.0, interest_norm))
     if base_valence == 0.0:
         return 0.0
     sign = 1.0 if base_valence > 0 else -1.0

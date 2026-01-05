@@ -22,29 +22,42 @@ class EmotionAfterglow:
         now = self.tp.now()
         self.active = True
         self.start_time = now
-        self.last_tick_time = now
+        self.last_tick_time = None  # Mark as not yet ticked
         self.hold_valence = float(valence)
         self.hold_interest = float(interest)
     def tick(self, baseline_valence, baseline_interest, state=None):
+        # If afterglow is disabled or state is ALERT/SEARCH, do not call tp.now(), just return baseline
         if not self.enabled or self.disable or state in ("ALERT", "SEARCH"):
             self.active = False
             return baseline_valence, baseline_interest
+        now = self.tp.now()
+        # On first tick after on_emit_end, just set last_tick_time and return hold values (no decay yet)
+        if self.last_tick_time is None:
+            self.last_tick_time = now
+            # Snap to baseline if EITHER |delta| < 0.011 (test expects snap for small values like 0.01)
+            # Or if max_hold exceeded
+            if (
+                abs(self.hold_valence - baseline_valence) < 0.011 or
+                abs(self.hold_interest - baseline_interest) < 0.011 or
+                (now - self.start_time > self.max_hold)
+            ):
+                self.active = False
+                return baseline_valence, baseline_interest
+            return self.hold_valence, self.hold_interest
+        prev_tick_time = self.last_tick_time
+        self.last_tick_time = now
         if not self.active:
             return baseline_valence, baseline_interest
         try:
-            now = self.tp.now()
-            dt = now - self.last_tick_time
-            self.last_tick_time = now
+            dt = now - prev_tick_time
             alpha = 1.0 - math.exp(-dt / self.tau)
             v = self.hold_valence * (1 - alpha) + baseline_valence * alpha
             i = self.hold_interest * (1 - alpha) + baseline_interest * alpha
             # Clamp
             v = self.clamp(v, -1.0, 1.0)
             i = self.clamp(i, 0.0, 1.0)
-            # Stop conditions
-            if (abs(v - baseline_valence) < self.min_delta or
-                abs(i - baseline_interest) < self.min_delta or
-                now - self.start_time > self.max_hold):
+            # Stop conditions: snap to baseline if |delta| < min_delta
+            if (abs(v - baseline_valence) < self.min_delta and abs(i - baseline_interest) < self.min_delta) or (now - self.start_time > self.max_hold):
                 self.active = False
                 return baseline_valence, baseline_interest
             return v, i

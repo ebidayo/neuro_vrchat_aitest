@@ -27,3 +27,13 @@ logs/
 # Python caches
 __pycache__/
 *.pyc
+
+# local debug artifacts
+encoding_debug.py
+pr5_debug.txt
+pr5_delay_debug.py
+pr5_delay_debug_ascii.py
+pr5_trace.txt
+pr5_trace2.txt
+*.log
+*.txt

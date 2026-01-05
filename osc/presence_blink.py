@@ -14,6 +14,7 @@ class PresenceBlink:
         self.next_blink_due = 0.0
         self.is_pulsing = False
     def tick(self, state, is_speaking):
+        interval = None
         if not self.enabled or state != 'IDLE' or is_speaking:
             return
         now = self.tp.now()
@@ -23,14 +24,16 @@ class PresenceBlink:
             interval = rng.uniform(self.min_sec, self.max_sec)
             self.next_blink_due = now + interval
             self.is_pulsing = True
+            self._pulse_start_ts = now
             try:
                 self.osc.send_param('blink_hint', 1)
             except Exception:
                 pass
-        # End pulse after pulse_ms
-        if self.is_pulsing and now - (self.next_blink_due - interval) >= self.pulse_ms / 1000.0:
-            self.is_pulsing = False
-            try:
-                self.osc.send_param('blink_hint', 0)
-            except Exception:
-                pass
+        # End pulse after pulse_ms (STRICT: only send blink_hint=0 at pulse end)
+        if self.is_pulsing and hasattr(self, '_pulse_start_ts'):
+            if now - self._pulse_start_ts >= self.pulse_ms / 1000.0:
+                self.is_pulsing = False
+                try:
+                    self.osc.send_param('blink_hint', 0)
+                except Exception:
+                    pass

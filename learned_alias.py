@@ -51,23 +51,21 @@ def extract_candidate_alias(normalized_text: str, min_len=2, max_len=8, forbid_t
     if forbid_tokens is None:
         forbid_tokens = []
     candidates = set()
-    # Pattern 1: <alias>って呼んで
-    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]{%d,%d})って呼んで' % (min_len, max_len), normalized_text):
+    # Patterns (extract first, then length check)
+    # 1. <alias>って呼んで
+    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+)って呼んで', normalized_text):
         candidates.add(m.group(1))
-    # Pattern 2: <alias>でいい
-    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]{%d,%d})でいい' % (min_len, max_len), normalized_text):
+    # 2. <alias>でいい
+    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+)でいい', normalized_text):
         candidates.add(m.group(1))
-    # Pattern 3: <alias>でお願い
-    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]{%d,%d})でお願い' % (min_len, max_len), normalized_text):
+    # 3. <alias>でお願い
+    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+)でお願い', normalized_text):
         candidates.add(m.group(1))
-    # Pattern 4: 呼び方は<alias>
-    for m in re.finditer(r'呼び方は([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]{%d,%d})' % (min_len, max_len), normalized_text):
+    # 4/5. あだ名は<alias> / 呼び方は<alias> (stop at でお願い, 願い, punctuation, whitespace, or end)
+    for m in re.finditer(r'(?:あだ名|呼び方)は\s*([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+?)(?:でお願い|お願い|ね|よ|$|[。！？\s])', normalized_text):
         candidates.add(m.group(1))
-    # Pattern 5: あだ名は<alias>
-    for m in re.finditer(r'あだ名は([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]{%d,%d})' % (min_len, max_len), normalized_text):
-        candidates.add(m.group(1))
-    # Pattern 6: <alias>で (at end)
-    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]{%d,%d})で[\s\u3000]*$' % (min_len, max_len), normalized_text):
+    # 6. <alias>で (at end)
+    for m in re.finditer(r'([\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+)で[\s\u3000]*$', normalized_text):
         candidates.add(m.group(1))
     # Filter
     filtered = []

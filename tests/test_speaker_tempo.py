@@ -1,5 +1,5 @@
 import pytest
-from speaker_tempo import compute_speaker_tempo
+from core.speaker_tempo import compute_speaker_tempo
 
 class DummyStore:
     def __init__(self, rec=0.0, usage=0.0, interest=0.0):
