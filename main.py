@@ -27,10 +27,14 @@ def run_demo_smoke(
     emitted_states: List[str] = []
     for i in range(steps_i):
         events.append({"t": "tick", "i": i, "r": rng.randint(0, 9)})
+    # Always ensure emitted_states is a list of strings, and 'IDLE' is present if required
+    idle_emitted = False
     if (not bool(agents_enabled)) or bool(force_idle_presence):
         chunks.append({"type": "idle_presence", "text": "...", "i": 0})
         states.append("IDLE")
-        emitted_states.append("IDLE")
+        if not idle_emitted:
+            emitted_states.append("IDLE")
+            idle_emitted = True
     if bool(agents_enabled):
         chunks.append({"type": "agents", "text": "agents_enabled", "i": 0})
         plans.append({"type": "agent_plan", "i": 0})
@@ -38,6 +42,7 @@ def run_demo_smoke(
         states.append("SEARCH")
         emitted_states.append("SEARCH")
     idle_presence_emits = sum(1 for c in chunks if c.get("type") == "idle_presence")
+    # Ensure plans is always an int, emitted_states is always a list of strings
     return {
         "ok": True,
         "agents_enabled": bool(agents_enabled),
@@ -45,10 +50,10 @@ def run_demo_smoke(
         "seed": int(seed),
         "events": events,
         "chunks": chunks,
-        "plans": len(plans),
+        "plans": int(len(plans)),
         "states": states,
         "idle_presence_emits": idle_presence_emits,
-        "emitted_states": emitted_states,
+        "emitted_states": list(emitted_states),
     }
 # --- CI test shim: resolve_greet_config ---
 def resolve_greet_config(cfg):
