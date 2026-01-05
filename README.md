@@ -1,49 +1,127 @@
+Misora_ai 取扱説明書（確定版）
 
-# neuro_vrchat_ai
+VOICEVOX + UA-4FX ループバック構成 / 自己音声抑制対応
 
-## What this is
-A deterministic, event-driven autonomous presence system for VRChat avatars. It models silence, subtlety, and emotional nuance, using only OSC for avatar control. The system is designed to feel alive without constant speech, prioritizing believable presence and privacy.
+1. 概要
 
-## Core Philosophy
-Silence is a feature, not a bug. Fewer words and longer pauses make an agent feel more intelligent and less intrusive. "Doing nothing" is a deliberate action, allowing the system to yield space and avoid overwhelming users. Determinism ensures every behavior is reproducible, testable, and free from hidden randomness, supporting both reliability and trust.
+Misora_ai は、VOICEVOX を用いた TTS 音声を
+指定したオーディオ出力デバイス（例：UA-4FX）に再生し、
+オーディオインターフェースの ループバック機能 により
+その音声を マイク入力として Discord / ゲームへ送出できます。
 
-## What this is NOT
-- Not a chatbot
-- Not a VRChat bot using internal APIs
-- Not an LLM wrapper
-- Not self-modifying or self-training
+TTS 再生中は STT入力を一時抑制できるため、
+自己会話ループや暴走を防いだ安定運用が可能です。
 
-## Architecture Overview
-- Event-driven StateMachine
-- Sacred chunk boundaries for speech and actions
-- Planner → Critic → Finalizer (mock LLM)
-- Scalar-based emotion model (valence, interest, arousal)
-- Fail-soft subsystems for all expressive and safety features
+2. 前提環境
 
-## Presence Without Speech
-The system maintains presence even in silence. During IDLE, it uses subtle face drift and micro-expressions. Starters and emotional afterglow provide gentle cues of aliveness. Micro-expressions and rare, meaningful actions are favored over frequent speech, making the agent feel present but never overwhelming.
+OS: Windows
+
+Python: 3.11
+
+VOICEVOX Engine（ローカル起動）
+
+Roland UA-4FX（ループバック対応）
+
+Discord / ゲーム（マイク入力を指定可能なもの）
+
+推奨：サブ垢でモニター（聞くだけ）
+
+3. 音声構成（確定）
+Misora TTS
+   ↓
+UA-4FX OUT  ──→（あなたの耳 or サブ垢でモニター）
+   ↓ ループバック
+UA-4FX IN
+   ↓
+Discord / Game マイク入力
 
 
-## Safety & Stability
-All subsystems are designed to fail softly: if a feature cannot run, it degrades silently to safe defaults. ResourceWatcher and SelfRegulator monitor system health, with ALERT states taking priority over all else. Silence is always safer than apology spam or error loops.
+Misora は 自分の声を聞かない
 
-**Emergency JP Chat Behavior:**
-- If the message content changes, it is sent immediately regardless of cooldown.
-- Disaster-level chat uses a fixed short template.
+あなたは サブ垢で安全にモニター
 
-## Determinism & Testing
-Determinism is enforced throughout: all timing and expressive logic use a TimeProvider and seeded RNG. Tests are written with pytest, require no network, and cover all core and polish features. The system is built with a CI mindset for reliability and reproducibility.
+自己会話ループなし
 
-## Requirements
-- Python 3.11
-- VRChat (OSC enabled)
-- Local TTS (optional)
+4. セットアップ手順
+4.1 VOICEVOX Engine 起動
 
-## Running the System
-```
-pip install -r requirements.txt
-python main.py
-```
+VOICEVOX を起動し、以下が有効であることを確認：
 
-## License
-See LICENSE file.
+http://127.0.0.1:50021
+
+4.2 UA-4FX 設定
+
+UA-4FX ドライバ設定で ループバック ON
+
+Windows 録音デバイスで UA-4FX IN のレベルが動くことを確認
+
+4.3 Discord / ゲーム設定
+
+マイク入力：UA-4FX IN
+
+出力：任意（サブ垢で聞く場合はそちら）
+
+5. Misora_ai 設定（確定）
+推奨 config.json
+{
+  "speech": {
+    "enabled": true,
+    "provider": "voicevox",
+    "sink": "device",
+    "voicevox": {
+      "base_url": "http://127.0.0.1:50021",
+      "speaker_id": 1,
+      "timeout_sec": 2.5
+    },
+    "device_sink": {
+      "name_contains": "UA-4FX"
+    },
+    "self_suppress": {
+      "enabled": true,
+      "tail_ms": 250
+    }
+  }
+}
+
+重要
+
+speech.enabled = false が デフォルト
+
+有効化しない限り 挙動は一切変わらない
+
+6. 動作確認チェック
+
+ Misoraが喋ると UA-4FX OUT から音が出る
+
+ Discordの入力メーターが反応する
+
+ TTS中に Misora が自分に反応しない
+
+7. よくあるトラブル
+音が出ない
+
+speech.enabled が false
+
+name_contains がデバイス名と一致していない
+
+VOICEVOX Engine 未起動
+
+Discordに声が届かない
+
+マイク入力が UA-4FX IN になっていない
+
+ループバックが OFF
+
+自己会話する
+
+self_suppress.enabled を確認
+
+自分のマイク音が出力ミックスに入っていないか確認
+
+8. 推奨運用
+
+メイン垢：Misora発話用
+
+サブ垢：聞くだけ（自分のマイクOFF）
+
+これが最も安定します

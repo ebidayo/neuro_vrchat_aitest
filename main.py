@@ -3,8 +3,20 @@ def handle_state_change(prev_state, new_state, **kwargs):
         return _handle_state_change(prev_state, new_state, **kwargs)
     except Exception:
         return None# --- CI test helpers for smoke_agents ---
+
 from typing import Any, Dict, List
 import random
+
+# --- Optional Speech Layer (PR6 skeleton, no-op by default) ---
+try:
+    from speech import SpeechEngine, NullTTSProvider, NullAudioSink, SpeechQueue
+    _speech_available = True
+except Exception:
+    _speech_available = False
+    SpeechEngine = None
+    NullTTSProvider = None
+    NullAudioSink = None
+    SpeechQueue = None
 
 def resolve_agents_enabled_from_config(cfg: Dict[str, Any]) -> bool:
     return bool(cfg.get("agents", {}).get("enabled", False))
@@ -196,12 +208,30 @@ def _send_chatbox(text, osc):
         osc.send_chatbox(text, send_immediately=True, notify=True)
         _reply_history.append((text, time.monotonic()))
         _last_chatbox_sent = time.monotonic()
+        # --- PR6: Optionally submit to speech layer (no-op by default) ---
+        if speech_enabled and speech_engine is not None:
+            try:
+                speech_engine.submit_text(str(text), now_ms=int(time.time() * 1000))
+            except Exception:
+                pass
     except Exception as e:
         import traceback
         print("[reply] send error:", e)
         traceback.print_exc()
 def _vad_on_transcript(text, latest_user_text):
+    # --- PR8: Deterministic self-voice suppression window (fail-soft, config-guarded) ---
     try:
+        speech_cfg = globals().get("cfg", {}).get("speech", {}) if "cfg" in globals() else {}
+        suppression_enabled = bool(speech_cfg.get("self_voice_suppression_enabled", False))
+        suppression_engine = speech_engine if speech_enabled and speech_engine is not None else None
+        now_ms = int(time.time() * 1000)
+        if suppression_enabled and suppression_engine is not None:
+            try:
+                if suppression_engine.is_speaking(now_ms):
+                    # Suppress STT event during self-voice window
+                    return
+            except Exception:
+                pass
         reply = _make_reply(latest_user_text)
         pending_reply["active"] = True
         pending_reply["text"] = reply
@@ -488,6 +518,7 @@ except Exception:
     emergency_chat_notifier = None
     error_burst = None
 
+
 # --- TTSエンジン初期化（fail-soft） ---
 tts = None
 prefetcher = None
@@ -503,6 +534,53 @@ try:
         prefetcher = TTSPrefetcher(tts)
 except Exception as e:
     logger.warning("TTS engine or prefetcher init failed: %s", e)
+
+
+# --- PR7-B1 Speech Layer: provider selection (voicevox, null) ---
+speech_engine = None
+speech_enabled = False
+try:
+    cfg = globals().get("cfg", {})
+    speech_cfg = cfg.get("speech", {}) if isinstance(cfg, dict) else {}
+    speech_enabled = bool(speech_cfg.get("enabled", False))
+    provider_name = str(speech_cfg.get("provider", "null")).lower()
+    tts_provider = None
+    if speech_enabled and _speech_available:
+        if provider_name == "voicevox":
+            try:
+                from speech.providers.voicevox_provider import VoiceVoxTTSProvider
+                vv_cfg = speech_cfg.get("voicevox", {})
+                base_url = vv_cfg.get("base_url", "http://127.0.0.1:50021")
+                speaker_id = vv_cfg.get("speaker_id", 1)
+                timeout_sec = vv_cfg.get("timeout_sec", 2.5)
+                tts_provider = VoiceVoxTTSProvider(
+                    base_url=base_url,
+                    speaker_id=speaker_id,
+                    timeout_sec=timeout_sec
+                )
+            except Exception:
+                tts_provider = NullTTSProvider()
+        else:
+            tts_provider = NullTTSProvider()
+        # --- PR7-B2: Device sink support ---
+        sink_name = str(speech_cfg.get("sink", "null")).lower()
+        sink = NullAudioSink()
+        if sink_name == "device":
+            try:
+                from speech.sinks.device_wav_sink import create_device_wav_sink
+                ds_cfg = speech_cfg.get("device_sink", {})
+                name_contains = ds_cfg.get("name_contains", "UA-4FX")
+                sink = create_device_wav_sink(name_contains=name_contains, enabled=True)
+            except Exception:
+                sink = NullAudioSink()
+        speech_engine = SpeechEngine(
+            tts=tts_provider,
+            sink=sink,
+            queue=SpeechQueue()
+        )
+except Exception:
+    speech_engine = None
+    speech_enabled = False
 
 
 def load_config(path: str = "config.yaml") -> dict:
