@@ -25,20 +25,17 @@ def run_demo_smoke(
     plans: List[Dict[str, Any]] = []
     states: List[str] = []
     emitted_states: List[str] = []
+    plans_count = 0
     for i in range(steps_i):
         events.append({"t": "tick", "i": i, "r": rng.randint(0, 9)})
-    # Always ensure emitted_states is a list of strings, and 'IDLE' is present if required
-    idle_emitted = False
+        if agents_enabled and (i % 2 == 0):
+            plans_count += 1
     if (not bool(agents_enabled)) or bool(force_idle_presence):
         chunks.append({"type": "idle_presence", "text": "...", "i": 0})
         states.append("IDLE")
-        if not idle_emitted:
-            emitted_states.append("IDLE")
-            idle_emitted = True
+        emitted_states.append("IDLE")
     if bool(agents_enabled):
         chunks.append({"type": "agents", "text": "agents_enabled", "i": 0})
-        plans.append({"type": "agent_plan", "i": 0})
-        plans.append({"type": "agent_plan", "i": 1})
         states.append("SEARCH")
         emitted_states.append("SEARCH")
     idle_presence_emits = sum(1 for c in chunks if c.get("type") == "idle_presence")
@@ -50,7 +47,7 @@ def run_demo_smoke(
         "seed": int(seed),
         "events": events,
         "chunks": chunks,
-        "plans": int(len(plans)),
+        "plans": int(plans_count),
         "states": states,
         "idle_presence_emits": idle_presence_emits,
         "emitted_states": list(emitted_states),
