@@ -1,3 +1,4 @@
+print("DEBUG_MAIN_FILE:", __file__)
 # --- Test harness helper for greet config ---
 # --- Test harness helper for greet config ---
 def resolve_greet_config(cfg):
@@ -20,10 +21,7 @@ def resolve_greet_config(cfg):
         "requires_known_name": bool(greet.get("requires_known_name", True)),
     }
 
-try:
-    from main import *  # noqa
-except Exception as e:
-    pass  # Fail-soft: allow import to succeed for tests
+  # Fail-soft: allow import to succeed for tests
 
 # --- Test harness helpers for smoke_agents ---
 from typing import Any, Dict, List, Optional
