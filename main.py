@@ -1,3 +1,53 @@
+# --- CI test shim: resolve_greet_config ---
+def resolve_greet_config(cfg):
+    """
+    Return greet config with required keys:
+      enabled (bool)
+      cooldown_sec (float)
+      min_silence_sec (float)
+      min_conf (float)
+      requires_known_name (bool)
+    Must be fail-soft: no KeyError even if cfg missing / wrong types.
+    Deterministic: no time, IO, randomness.
+    """
+    defaults = {
+        "enabled": True,
+        "cooldown_sec": 30.0,
+        "min_silence_sec": 2.0,
+        "min_conf": 0.6,
+        "requires_known_name": True,
+    }
+    if not isinstance(cfg, dict):
+        cfg = {}
+    greet = cfg.get("greet", {})
+    if not isinstance(greet, dict):
+        greet = {}
+    out = {}
+    # enabled
+    val = greet.get("enabled", defaults["enabled"])
+    out["enabled"] = bool(val) if val is not None else defaults["enabled"]
+    # cooldown_sec
+    val = greet.get("cooldown_sec", defaults["cooldown_sec"])
+    try:
+        out["cooldown_sec"] = float(val)
+    except Exception:
+        out["cooldown_sec"] = defaults["cooldown_sec"]
+    # min_silence_sec
+    val = greet.get("min_silence_sec", defaults["min_silence_sec"])
+    try:
+        out["min_silence_sec"] = float(val)
+    except Exception:
+        out["min_silence_sec"] = defaults["min_silence_sec"]
+    # min_conf
+    val = greet.get("min_conf", defaults["min_conf"])
+    try:
+        out["min_conf"] = float(val)
+    except Exception:
+        out["min_conf"] = defaults["min_conf"]
+    # requires_known_name
+    val = greet.get("requires_known_name", defaults["requires_known_name"])
+    out["requires_known_name"] = bool(val) if val is not None else defaults["requires_known_name"]
+    return out
 # --- ルールベース返信・予約送信ロジック ---
 import random
 import time
