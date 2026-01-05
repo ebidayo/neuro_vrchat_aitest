@@ -1,8 +1,21 @@
+
 import argparse
 import random
 from pprint import pprint
 import sys
 from pathlib import Path
+
+# Force UTF-8 output for Windows CI (fail-soft)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+def _safe(s: str) -> str:
+    try:
+        return s
+    except Exception:
+        return repr(s)
 
 # Ensure the repository root (parent of the package dir) is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -55,7 +68,8 @@ def main():
         print(f"CASE: {case_name}  scalars={s}")
         for text in TEXTS:
             print("-" * 90)
-            print(f"INPUT: {text}")
+            # Safe print for possible non-ascii input
+            print(f"INPUT: {_safe(text)}")
             plan = make_speech_plan(
                 reply=text,
                 glitch=s["glitch"],
