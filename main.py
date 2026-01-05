@@ -33,7 +33,8 @@ def run_demo_smoke(
     if (not bool(agents_enabled)) or bool(force_idle_presence):
         chunks.append({"type": "idle_presence", "text": "...", "i": 0})
         states.append("IDLE")
-        emitted_states.append("IDLE")
+        if "IDLE" not in emitted_states:
+            emitted_states.append("IDLE")
     if bool(agents_enabled):
         chunks.append({"type": "agents", "text": "agents_enabled", "i": 0})
         states.append("SEARCH")
