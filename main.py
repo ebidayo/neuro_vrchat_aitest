@@ -41,18 +41,19 @@ def run_demo_smoke(
         emitted_states.append("SEARCH")
     idle_presence_emits = sum(1 for c in chunks if c.get("type") == "idle_presence")
     # Ensure plans is always an int, emitted_states is always a list of strings
-    return {
+    out = {
         "ok": True,
         "agents_enabled": bool(agents_enabled),
         "steps": steps_i,
         "seed": int(seed),
         "events": events,
         "chunks": chunks,
-        "plans": int(plans_count),
         "states": states,
         "idle_presence_emits": idle_presence_emits,
-        "emitted_states": list(emitted_states),
     }
+    out["plans"] = int(plans_count)
+    out["emitted_states"] = list(emitted_states)
+    return out
 # --- CI test shim: resolve_greet_config ---
 def resolve_greet_config(cfg):
     """

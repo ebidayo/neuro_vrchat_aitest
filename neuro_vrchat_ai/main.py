@@ -52,19 +52,26 @@ def run_demo_smoke(
     events: List[Dict[str, Any]] = []
     chunks: List[Dict[str, Any]] = []
     plans: List[Dict[str, Any]] = []
+    emitted_states: list = []
+    plans_count = 0
 
     # Emit deterministic events list
     for i in range(steps_i):
         events.append({"i": i, "t": "tick", "r": rng.randint(0, 9)})
+        if agents_enabled and (i % 2 == 0):
+            plans_count += 1
 
     # Guarantee idle presence chunk if agents disabled OR forced
     if (not bool(agents_enabled)) or bool(force_idle_presence):
         chunks.append({"type": "idle_presence", "text": "...", "i": 0})
+        if "IDLE" not in emitted_states:
+            emitted_states.append("IDLE")
 
     # Guarantee agents marker chunk if enabled
     if bool(agents_enabled):
         chunks.append({"type": "agents", "text": "agents_enabled", "i": 0})
-        plans.append({"type": "agent_plan", "i": 0})
+        if "SEARCH" not in emitted_states:
+            emitted_states.append("SEARCH")
 
     idle_presence_emits = sum(1 for c in chunks if c.get("type") == "idle_presence")
 
@@ -75,6 +82,7 @@ def run_demo_smoke(
         "seed": int(seed),
         "events": events,
         "chunks": chunks,
-        "plans": plans,
+        "plans": int(plans_count),
         "idle_presence_emits": idle_presence_emits,
+        "emitted_states": emitted_states,
     }
