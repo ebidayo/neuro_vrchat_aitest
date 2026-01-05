@@ -413,19 +413,20 @@ class StateMachine:
                 if seq > prev_seq:
                     self.current_alert.update(p)
                     self._last_alert_was_update = True
-                from learned_alias import normalize_for_alias, extract_candidate_alias, filter_candidate
-                from learned_alias_manager import update_alias, get_confirmed_aliases
-                from learned_alias_store import InMemoryLearnedAliasStore, SqliteLearnedAliasStore
-            except Exception:
-                detect_self_address = None
-                AddressDecision = None
-                normalize_for_alias = None
-                extract_candidate_alias = None
-                filter_candidate = None
-                update_alias = None
-                get_confirmed_aliases = None
-                InMemoryLearnedAliasStore = None
-                SqliteLearnedAliasStore = None
+                try:
+                    from learned_alias import normalize_for_alias, extract_candidate_alias, filter_candidate
+                    from learned_alias_manager import update_alias, get_confirmed_aliases
+                    from learned_alias_store import InMemoryLearnedAliasStore, SqliteLearnedAliasStore
+                except Exception:
+                    detect_self_address = None
+                    AddressDecision = None
+                    normalize_for_alias = None
+                    extract_candidate_alias = None
+                    filter_candidate = None
+                    update_alias = None
+                    get_confirmed_aliases = None
+                    InMemoryLearnedAliasStore = None
+                    SqliteLearnedAliasStore = None
             # Config resolution (fail-soft, safe defaults)
             cfg = getattr(self, "cfg", {}) if hasattr(self, "cfg") else {}
             sa_cfg = cfg.get("stt", {}).get("self_address", {}) if isinstance(cfg.get("stt", {}), dict) else {}
